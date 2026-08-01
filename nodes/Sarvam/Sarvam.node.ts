@@ -7,6 +7,8 @@ import type {
 } from 'n8n-workflow';
 import { NodeOperationError } from 'n8n-workflow';
 
+import { buildChatCompletionBody } from './buildChatCompletionBody';
+
 const BASE_URL = 'https://api.sarvam.ai';
 
 const STT_LANGUAGES = [
@@ -292,8 +294,10 @@ export class Sarvam implements INodeType {
 				default: 'sarvam-105b',
 				options: [
 					{ name: 'Sarvam 105B', value: 'sarvam-105b' },
-					{ name: 'Sarvam 30B', value: 'sarvam-30b' },
+					{ name: 'Sarvam 30B (Deprecated)', value: 'sarvam-30b' },
 				],
+				description:
+					'Chat model to use. Prefer sarvam-105b; sarvam-30b is deprecated.',
 				displayOptions: { show: { resource: ['chat'], operation: ['complete'] } },
 			},
 			{
@@ -337,6 +341,8 @@ export class Sarvam implements INodeType {
 						type: 'number',
 						default: 1024,
 						typeOptions: { minValue: 1 },
+						description:
+							'Maximum tokens in the response. Always sent (defaults to 1024 even if this option is not added). Required for reliable sarvam-105b replies.',
 					},
 					{
 						displayName: 'Presence Penalty',
@@ -512,23 +518,25 @@ async function handleChatOperations(
 	}
 	messages.push({ role: 'user', content: userMessage });
 
-	const body: IDataObject = { model, messages };
-	if (options.temperature !== undefined) body.temperature = options.temperature;
-	if (options.top_p !== undefined) body.top_p = options.top_p;
-	if (options.max_tokens) body.max_tokens = options.max_tokens;
-	if (options.frequency_penalty !== undefined) body.frequency_penalty = options.frequency_penalty;
-	if (options.presence_penalty !== undefined) body.presence_penalty = options.presence_penalty;
-	if (options.wiki_grounding !== undefined) body.wiki_grounding = options.wiki_grounding;
-	if (options.seed) body.seed = options.seed;
-	if (options.reasoning_effort) body.reasoning_effort = options.reasoning_effort;
-
+	const body = buildChatCompletionBody(model, messages, options);
 	return await makeApiRequest.call(this, 'POST', '/v1/chat/completions', body);
 }
 
 function formatApiError(error: unknown): string {
-	const err = error as { statusCode?: number; message?: string; body?: { error?: { message?: string }; detail?: string } };
+	const err = error as {
+		statusCode?: number;
+		message?: string;
+		body?: { error?: { message?: string }; detail?: string | Array<{ msg?: string }> };
+	};
 	const status = err.statusCode;
-	const apiMessage = err.body?.error?.message ?? err.body?.detail ?? err.message ?? 'Unknown error';
+	const detail = err.body?.detail;
+	const detailText = Array.isArray(detail)
+		? detail.map((d) => d.msg).filter(Boolean).join('; ')
+		: typeof detail === 'string'
+			? detail
+			: undefined;
+	const apiMessage =
+		err.body?.error?.message ?? detailText ?? err.message ?? 'Unknown error';
 
 	if (status === 401 || status === 403) {
 		return 'Invalid or expired API key. Check your Sarvam AI credential.';
@@ -536,7 +544,7 @@ function formatApiError(error: unknown): string {
 	if (status === 402 || apiMessage.includes('insufficient_quota')) {
 		return 'Insufficient API credits. Top up at dashboard.sarvam.ai.';
 	}
-	if (status === 422) {
+	if (status === 400 || status === 422) {
 		return `Invalid request: ${apiMessage}`;
 	}
 	if (status === 429) {

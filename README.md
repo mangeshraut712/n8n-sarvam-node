@@ -53,7 +53,7 @@ In n8n, create a new **Sarvam AI API** credential and paste your API key.
 
 **Text to Speech (11 languages):** Bengali, English, Gujarati, Hindi, Kannada, Malayalam, Marathi, Odia, Punjabi, Tamil, Telugu.
 
-**Chat:** Supports all languages via sarvam-105b (flagship) and sarvam-30b models.
+**Chat:** Supports all languages via sarvam-105b (flagship). sarvam-30b remains available but is deprecated. Chat completions always send a `max_tokens` budget (default 1024) so sarvam-105b does not fail when Options → Max Tokens is left unset.
 
 ## Publishing (maintainers)
 
